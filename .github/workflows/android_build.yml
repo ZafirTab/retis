@@ -1,0 +1,45 @@
+name: Build Retis for Android ARM64
+
+on:
+  workflow_dispatch: # 支持网页上手动点击按钮触发构建
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up QEMU (跨架构模拟器)
+        uses: docker/setup-qemu-action@v3
+
+      - name: 启动 Alpine ARM64 容器静态编译
+        run: |
+          docker run --rm --platform linux/arm64 -v ${{ github.workspace }}:/output alpine:edge sh -euxc "
+            apk update
+            # 安装构建工具链与静态库依赖
+            apk add git rust cargo clang llvm-dev clang-dev elfutils-dev \
+                    musl-dev linux-headers make pkgconfig zlib-dev zlib-static \
+                    libpcap-dev libpcap-static jq
+            
+            # 克隆 retis 最新源码
+            git clone --depth 1 https://github.com/retis-org/retis.git /retis
+            cd /retis
+            
+            # 开启纯静态链接
+            # 优先关闭 python 插件依赖（Android 内部没有 libpython，独立运行必须去除）
+            export RUSTFLAGS='-C target-feature=+crt-static'
+            cargo build --release --no-default-features || cargo build --release
+            
+            # 压缩剥离调试符号
+            strip target/release/retis
+            cp target/release/retis /output/retis
+          "
+
+      - name: 验证二进制属性
+        run: |
+          ls -lh retis
+          file retis
+
+      - name: 上传构建产物 (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: retis-android-arm64
+          path: retis
